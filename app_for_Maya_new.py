@@ -5,43 +5,25 @@ from pandastable import Table
 from pandasql import sqldf
 import os
 import logging
-from datetime import datetime
 from tkcalendar import DateEntry
+from datetime import datetime
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
 
 class ExcelTableApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Excel Data Viewer & Aggregator")
-        self.root.state('zoomed')  # Make full-screen
+        self.root.state('zoomed')  # Fullscreen
 
         self.df = pd.DataFrame()
         self.table = None
         self.current_file = None
+        self.filters = {}
 
-        self._check_dependencies()
         self._setup_widgets()
         self._setup_filters()
         self._initialize_table()
-
-        logging.info("Application initialized successfully.")
-
-    def _check_dependencies(self):
-        try:
-            import openpyxl
-            import xlwt
-            import pandasql
-            import pandastable
-            import tkcalendar
-        except ImportError as e:
-            messagebox.showerror(
-                "Missing Dependency",
-                f"Missing required library: {e}. Please install pandas, openpyxl, pandastable, pandasql, xlwt, and tkcalendar."
-            )
-            raise
 
     def _setup_widgets(self):
         self.file_label = tk.Label(self.root, text="No file loaded", pady=10, font=("Arial", 12))
@@ -56,11 +38,13 @@ class ExcelTableApp:
         self.save_button = tk.Button(self.button_frame, text="Save to Excel", command=self.save_file, state=tk.DISABLED)
         self.save_button.pack(side=tk.LEFT, padx=5)
 
+    def _on_date_validate(self, action, value_if_allowed):
+        # Allow user to delete date field manually
+        return True
+
     def _setup_filters(self):
         self.filter_frame = tk.Frame(self.root)
         self.filter_frame.pack(pady=10)
-
-        self.filters = {}
 
         def add_dropdown(label, col_name):
             tk.Label(self.filter_frame, text=label).pack(side=tk.LEFT, padx=5)
@@ -73,14 +57,20 @@ class ExcelTableApp:
         add_dropdown("Revision Desc:", "Revision Description")
         add_dropdown("UBOC Code:", "UBOC Return Code")
 
-        # Date pickers
+        # DateEntry with blank default
+        vcmd = (self.root.register(self._on_date_validate), '%d', '%P')
+
         tk.Label(self.filter_frame, text="UBOC Approval Date From:").pack(side=tk.LEFT, padx=5)
-        self.date_from = DateEntry(self.filter_frame, date_pattern='dd/mm/yyyy', width=12)
+        self.date_from = DateEntry(self.filter_frame, date_pattern='dd/mm/yyyy', width=12,
+                                   validate='key', validatecommand=vcmd)
         self.date_from.pack(side=tk.LEFT)
+        self.date_from.delete(0, tk.END)
 
         tk.Label(self.filter_frame, text="To:").pack(side=tk.LEFT)
-        self.date_to = DateEntry(self.filter_frame, date_pattern='dd/mm/yyyy', width=12)
+        self.date_to = DateEntry(self.filter_frame, date_pattern='dd/mm/yyyy', width=12,
+                                 validate='key', validatecommand=vcmd)
         self.date_to.pack(side=tk.LEFT)
+        self.date_to.delete(0, tk.END)
 
         tk.Button(self.filter_frame, text="Apply Filters", command=self.apply_filter).pack(side=tk.LEFT, padx=10)
 
@@ -102,7 +92,6 @@ class ExcelTableApp:
             result_df = sqldf(query, {"df": df})
             return result_df if not result_df.empty else df
         except Exception as e:
-            logging.warning(f"Aggregation failed: {e}")
             messagebox.showwarning("Warning", f"Aggregation failed: {e}. Showing original data.")
             return df
 
@@ -113,21 +102,38 @@ class ExcelTableApp:
 
         filtered_df = self.df.copy()
 
+        # Dropdown filters
         for col, combo in self.filters.items():
             value = combo.get()
-            if value:
+            if value == "BLANK":
+                # Filter rows where column is NaN or empty string (after stripping spaces)
+                filtered_df = filtered_df[filtered_df[col].isna() | (filtered_df[col].str.strip() == "")]
+            elif value and value != "ALL":
                 filtered_df = filtered_df[filtered_df[col] == value]
 
+        # Date filtering
         date_col = "UBOC Approval Date"
         if date_col in filtered_df.columns:
             try:
-                from_date = self.date_from.get_date()
-                to_date = self.date_to.get_date()
-                date_series = pd.to_datetime(filtered_df[date_col], errors='coerce').dt.date
-                filtered_df = filtered_df[
-                    (date_series >= from_date) &
-                    (date_series <= to_date)
-                    ]
+                from_date = self.date_from.get()
+                to_date = self.date_to.get()
+
+                if from_date.strip() or to_date.strip():
+                    from_dt = self.date_from.get_date() if from_date.strip() else None
+                    to_dt = self.date_to.get_date() if to_date.strip() else None
+
+                    date_series = pd.to_datetime(filtered_df[date_col], errors='coerce').dt.date
+                    valid_dates = date_series.notnull()
+
+                    mask = pd.Series(True, index=filtered_df.index)
+                    if from_dt:
+                        mask &= date_series >= from_dt
+                    if to_dt:
+                        mask &= date_series <= to_dt
+
+                    filtered_df = filtered_df[valid_dates & mask]
+                # else: no filtering, keep all
+
             except Exception as e:
                 messagebox.showerror("Error", f"Date filtering failed: {e}")
                 return
@@ -157,7 +163,6 @@ class ExcelTableApp:
             self._populate_filter_dropdowns()
 
         except Exception as e:
-            logging.error(f"File loading error: {e}")
             messagebox.showerror("Error", f"Could not load file: {e}")
             self.df = pd.DataFrame()
 
@@ -165,8 +170,11 @@ class ExcelTableApp:
         for col, combo in self.filters.items():
             if col in self.df.columns:
                 unique_values = sorted(self.df[col].dropna().unique())
-                combo['values'] = [""] + unique_values
-                combo.set("")
+                combo['values'] = ["ALL"] + unique_values + ["BLANK"]
+                combo.set("ALL")
+
+        self.date_from.delete(0, tk.END)
+        self.date_to.delete(0, tk.END)
 
     def refresh_file(self):
         if not self.current_file:
@@ -179,7 +187,6 @@ class ExcelTableApp:
             self._update_status(f"Aggregated data from: {os.path.basename(self.current_file)}")
             self._populate_filter_dropdowns()
         except Exception as e:
-            logging.error(f"Refresh error: {e}")
             messagebox.showerror("Error", f"Could not refresh file: {e}")
 
     def save_file(self):
@@ -204,7 +211,6 @@ class ExcelTableApp:
 
             self._update_status(f"Data saved to: {os.path.basename(file_path)}")
         except Exception as e:
-            logging.error(f"Save error: {e}")
             messagebox.showerror("Error", f"Could not save file: {e}")
 
     def _update_table(self):
