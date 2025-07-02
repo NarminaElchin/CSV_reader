@@ -85,7 +85,8 @@ class ExcelTableApp:
             "SELECT * FROM df df1 "
             "WHERE NOT EXISTS ("
             "SELECT 1 FROM df df2 "
-            "WHERE df1.name = df2.name AND df2.Rev IN ('A01', 'V01', 'X01')) "
+            "WHERE df1.name = df2.name AND df2.Rev IN ('V01', 'X01')) "
+            "AND df1.Rev != 'A01'"
             "AND df1.Subject IN ('EXECUTE', 'DEFINE/EXECUTE')"
         )
         try:
