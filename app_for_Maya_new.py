@@ -52,15 +52,12 @@ class ExcelTableApp:
             combo.pack(side=tk.LEFT)
             self.filters[col_name] = combo
 
-        add_dropdown("Subject:", "Subject")
-        add_dropdown("Rev:", "Rev")
-        add_dropdown("Revision Desc:", "Revision Description")
         add_dropdown("UBOC Code:", "UBOC Return Code")
 
         # DateEntry with blank default
         vcmd = (self.root.register(self._on_date_validate), '%d', '%P')
 
-        tk.Label(self.filter_frame, text="UBOC Approval Date From:").pack(side=tk.LEFT, padx=5)
+        tk.Label(self.filter_frame, text="Workflow Start From:").pack(side=tk.LEFT, padx=5)
         self.date_from = DateEntry(self.filter_frame, date_pattern='dd/mm/yyyy', width=12,
                                    validate='key', validatecommand=vcmd)
         self.date_from.pack(side=tk.LEFT)
@@ -82,7 +79,9 @@ class ExcelTableApp:
 
     def apply_aggregation(self, df: pd.DataFrame) -> pd.DataFrame:
         query = (
-            "SELECT * FROM df df1 "
+            "SELECT "
+            "*"
+            "FROM df df1 "
             "WHERE NOT EXISTS ("
             "SELECT 1 FROM df df2 "
             "WHERE df1.name = df2.name AND df2.Rev IN ('V01', 'X01')) "
@@ -113,7 +112,7 @@ class ExcelTableApp:
                 filtered_df = filtered_df[filtered_df[col] == value]
 
         # Date filtering
-        date_col = "UBOC Approval Date"
+        date_col = "Workflow Start"
         if date_col in filtered_df.columns:
             try:
                 from_date = self.date_from.get()
