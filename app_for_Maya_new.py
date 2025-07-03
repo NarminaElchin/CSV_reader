@@ -23,11 +23,9 @@ class AdaptiveFiltersFrame(tk.Frame):
         width = event.width
         max_per_row = max(1, width // self.max_widget_width)
 
-        # Clear existing grid
         for w in self.filter_widgets:
             w.grid_forget()
 
-        # Re-grid widgets with wrapping
         for idx, widget in enumerate(self.filter_widgets):
             row = idx // max_per_row
             col = idx % max_per_row
@@ -35,7 +33,6 @@ class AdaptiveFiltersFrame(tk.Frame):
 
         for col in range(max_per_row):
             self.grid_columnconfigure(col, weight=1)
-
 
 class CSVTableApp:
     def __init__(self, root):
@@ -71,7 +68,6 @@ class CSVTableApp:
         self.filter_frame = AdaptiveFiltersFrame(self.root, max_widget_width=250)
         self.filter_frame.pack(fill=tk.X, pady=10, padx=10)
 
-        # UBOC filter button
         uboc_frame = tk.Frame(self.filter_frame)
         uboc_label = tk.Label(uboc_frame, text="UBOC Code:")
         uboc_label.pack(side=tk.LEFT, padx=(0, 5))
