@@ -4,167 +4,230 @@ import pandas as pd
 from pandastable import Table
 from pandasql import sqldf
 import os
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+from tkcalendar import DateEntry
+from datetime import datetime
 
 class ExcelTableApp:
-    """
-    GUI Application for loading, aggregating, and saving Excel data using SQL logic.
-    """
     def __init__(self, root):
         self.root = root
-        self.root.title("App for my dear auntie Maya")
-        self.root.geometry("800x600")
+        self.root.title("Excel Data Viewer & Aggregator")
+        self.root.state('zoomed')
 
-        # Initialize core components
-        self.df = pd.DataFrame()
-        self.table = None
+        self.df_raw_original = pd.DataFrame()
+        self.df_raw = pd.DataFrame()
         self.current_file = None
+        self.selected_uboc_values = []
 
-        self._check_dependencies()
         self._setup_widgets()
+        self._setup_filters()
         self._initialize_table()
 
-        logging.info("Application initialized successfully.")
-
-    def _check_dependencies(self):
-        """Ensure required libraries are available."""
-        try:
-            import openpyxl
-            import xlwt
-            import pandasql
-            import pandastable
-        except ImportError as e:
-            messagebox.showerror(
-                "Missing Dependency",
-                f"Missing required library: {e}. Please install pandas, openpyxl, pandastable, pandasql, and xlwt."
-            )
-            raise
-
     def _setup_widgets(self):
-        """Configure GUI layout and buttons."""
-        self.file_label = tk.Label(self.root, text="No file loaded", pady=10)
+        self.file_label = tk.Label(self.root, text="No file loaded", pady=10, font=("Arial", 12))
         self.file_label.pack()
 
         self.button_frame = tk.Frame(self.root)
         self.button_frame.pack(pady=5)
 
         tk.Button(self.button_frame, text="Load Excel File", command=self.load_file).pack(side=tk.LEFT, padx=5)
-
         self.refresh_button = tk.Button(self.button_frame, text="Refresh", command=self.refresh_file, state=tk.DISABLED)
         self.refresh_button.pack(side=tk.LEFT, padx=5)
-
         self.save_button = tk.Button(self.button_frame, text="Save to Excel", command=self.save_file, state=tk.DISABLED)
         self.save_button.pack(side=tk.LEFT, padx=5)
 
-        self.table_frame = tk.Frame(self.root)
-        self.table_frame.pack(fill=tk.BOTH, expand=1, padx=10, pady=10)
-
     def _setup_filters(self):
-        """Create UI filter widgets above the table."""
         self.filter_frame = tk.Frame(self.root)
-        self.filter_frame.pack(pady=5)
+        self.filter_frame.pack(pady=10)
 
-        tk.Label(self.filter_frame, text="Filter by Name:").pack(side=tk.LEFT)
-        self.name_filter_entry = tk.Entry(self.filter_frame, width=15)
-        self.name_filter_entry.pack(side=tk.LEFT, padx=5)
+        uboc_frame = tk.Frame(self.filter_frame)
+        uboc_frame.pack(side=tk.LEFT, padx=5)
+        tk.Label(uboc_frame, text="UBOC Code:").pack()
+        self.uboc_button_var = tk.StringVar(value="Select UBOC Code ▼")
+        self.uboc_dropdown_button = tk.Button(uboc_frame, textvariable=self.uboc_button_var, width=25,
+                                              command=self.show_uboc_dropdown)
+        self.uboc_dropdown_button.pack()
 
-        tk.Label(self.filter_frame, text="Filter by Subject:").pack(side=tk.LEFT)
-        self.subject_filter_entry = tk.Entry(self.filter_frame, width=15)
-        self.subject_filter_entry.pack(side=tk.LEFT, padx=5)
+        tk.Label(self.filter_frame, text="Workflow Start From:").pack(side=tk.LEFT, padx=5)
+        self.date_from = DateEntry(self.filter_frame, date_pattern='dd/mm/yyyy', width=12,
+                                   validate='key', validatecommand=self.show_uboc_dropdown)
+        self.date_from.pack(side=tk.LEFT)
+        self.date_from.delete(0, tk.END)
 
-        tk.Button(self.filter_frame, text="Apply Filter", command=self.apply_filter).pack(side=tk.LEFT, padx=10)
+        tk.Label(self.filter_frame, text="To:").pack(side=tk.LEFT)
+        self.date_to = DateEntry(self.filter_frame, date_pattern='dd/mm/yyyy', width=12,
+                                 validate='key', validatecommand=self.show_uboc_dropdown)
+        self.date_to.pack(side=tk.LEFT)
+        self.date_to.delete(0, tk.END)
+
+        tk.Button(self.filter_frame, text="Apply Filters", command=self.apply_filter).pack(side=tk.LEFT, padx=10)
+
+    def show_uboc_dropdown(self):
+        if "UBOC Return Code" not in self.df_raw.columns:
+            return
+
+        top = tk.Toplevel(self.root)
+        top.title("Select UBOC Code")
+        top.geometry("+%d+%d" % (self.root.winfo_pointerx(), self.root.winfo_pointery()))
+        top.grab_set()
+
+        self.uboc_vars = {}
+        all_values = sorted(self.df_raw["UBOC Return Code"].dropna().unique())
+        all_values = all_values + ["BLANK"]
+
+        for val in all_values:
+            var = tk.BooleanVar(value=val in self.selected_uboc_values)
+            cb = tk.Checkbutton(top, text=val, variable=var, anchor="w")
+            cb.pack(fill="x", padx=10)
+            self.uboc_vars[val] = var
+
+        def confirm_selection():
+            selected = [k for k, v in self.uboc_vars.items() if v.get()]
+            self.selected_uboc_values = selected
+            display_text = ", ".join(selected[:3])
+            if len(selected) > 3:
+                display_text += f"... (+{len(selected)-3})"
+            self.uboc_button_var.set(display_text or "Select UBOC Code ▼")
+            top.destroy()
+
+        tk.Button(top, text="Confirm", command=confirm_selection).pack(pady=5)
 
     def _initialize_table(self):
-        """Display empty table on startup."""
-        self.table = Table(self.table_frame, dataframe=self.df, showtoolbar=False, showstatusbar=True)
+        self.table_frame = tk.Frame(self.root)
+        self.table_frame.pack(fill=tk.BOTH, expand=1, padx=10, pady=10)
+        self.table = Table(self.table_frame, dataframe=self.df_raw, showtoolbar=False, showstatusbar=True)
         self.table.show()
 
-    def apply_aggregation(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Apply predefined SQL aggregation query to filter data.
-        """
+    def apply_initial_base_sql(self, df):
         query = (
-            """
-            SELECT * FROM df df1 
-            WHERE NOT EXISTS (
-            SELECT 1 FROM df df2 
-            WHERE df1.name = df2.name AND df2.Rev IN ('A01', 'V01', 'X01')) 
-            AND df1.Subject IN ('EXECUTE', 'DEFINE/EXECUTE')
-            """
+            "SELECT * FROM df df1 "
+            "WHERE NOT EXISTS ("
+            "SELECT 1 FROM df df2 WHERE df1.name = df2.name AND df2.Rev IN ('V01', 'X01')) "
+            "AND df1.Rev != 'A01' "
+            "AND df1.Subject IN ('EXECUTE', 'DEFINE/EXECUTE') "
         )
         try:
-            result_df = sqldf(query, {"df": df})
-            return result_df if not result_df.empty else df
+            return sqldf(query, {"df": df})
         except Exception as e:
-            logging.warning(f"Aggregation failed: {e}")
-            messagebox.showwarning("Warning", f"Aggregation failed: {e}. Showing original data.")
+            messagebox.showerror("SQL Error", f"Base SQL filtering failed: {e}")
+            return df
+
+    def apply_aggregation(self, df):
+        query = (
+            "SELECT "
+            "df1.Name, df1.Title, "
+            "SUM(CASE WHEN df1.Rev LIKE 'B%' THEN 1 ELSE 0 END) AS IFR, "
+            "SUM(CASE WHEN df1.Rev LIKE 'D%' THEN 1 ELSE 0 END) AS AFD, "
+            "SUM(CASE WHEN df1.Rev LIKE 'U%' THEN 1 ELSE 0 END) AS AFU, "
+            "SUM(CASE WHEN df1.Rev LIKE 'H%' THEN 1 ELSE 0 END) AS AFH, "
+            "SUM(CASE WHEN df1.Rev LIKE 'I%' THEN 1 ELSE 0 END) AS IFI, "
+            "SUM(CASE WHEN df1.Rev LIKE 'E%' THEN 1 ELSE 0 END) AS IFE, "
+            "SUM(CASE WHEN df1.Rev LIKE 'P%' THEN 1 ELSE 0 END) AS IFP, "
+            "SUM(CASE WHEN df1.Rev LIKE 'C%' THEN 1 ELSE 0 END) AS AFC "
+            "FROM df df1 "
+            "GROUP BY df1.Name, df1.Title"
+        )
+        try:
+            return sqldf(query, {"df": df})
+        except Exception as e:
+            messagebox.showwarning("Aggregation Failed", f"{e}")
             return df
 
     def apply_filter(self):
-        """Apply user-entered filters to the DataFrame."""
-        if self.df is None or self.df.empty:
+        if self.df_raw.empty:
             messagebox.showinfo("Info", "No data to filter.")
             return
 
-        filtered_df = self.df.copy()
+        filtered_df = self.df_raw.copy()
 
-        name_filter = self.name_filter_entry.get().strip().lower()
-        subject_filter = self.subject_filter_entry.get().strip().lower()
+        if self.selected_uboc_values and "ALL" not in self.selected_uboc_values:
+            mask = pd.Series(False, index=filtered_df.index)
 
-        if name_filter:
-            filtered_df = filtered_df[filtered_df['name'].astype(str).str.lower().str.contains(name_filter)]
+            if "BLANK" in self.selected_uboc_values:
+                mask |= (
+                    filtered_df["UBOC Return Code"].isna() |
+                    (filtered_df["UBOC Return Code"].str.strip() == "")
+                )
 
-        if subject_filter:
-            filtered_df = filtered_df[filtered_df['Subject'].astype(str).str.lower().str.contains(subject_filter)]
+            normal_values = [v for v in self.selected_uboc_values if v != "BLANK"]
+            if normal_values:
+                mask |= filtered_df["UBOC Return Code"].isin(normal_values)
+
+            filtered_df = filtered_df[mask]
+
+        date_col = "Workflow Start"
+        if date_col in filtered_df.columns:
+            try:
+                from_date = self.date_from.get()
+                to_date = self.date_to.get()
+                if from_date.strip() or to_date.strip():
+                    from_dt = self.date_from.get_date() if from_date.strip() else None
+                    to_dt = self.date_to.get_date() if to_date.strip() else None
+
+                    date_series = pd.to_datetime(filtered_df[date_col], errors='coerce').dt.date
+                    valid_dates = date_series.notnull()
+
+                    mask = pd.Series(True, index=filtered_df.index)
+                    if from_dt:
+                        mask &= date_series >= from_dt
+                    if to_dt:
+                        mask &= date_series <= to_dt
+
+                    filtered_df = filtered_df[valid_dates & mask]
+            except Exception as e:
+                messagebox.showerror("Date Filter Error", str(e))
+                return
 
         if filtered_df.empty:
             messagebox.showinfo("Info", "No matching records found.")
+            self.table.model.df = pd.DataFrame()
         else:
-            self.table.model.df = filtered_df
-            self.table.redraw()
+            agg_df = self.apply_aggregation(filtered_df)
+            self.table.model.df = agg_df
+
+        self.table.redraw()
 
     def load_file(self):
-        """Load Excel file and apply aggregation."""
         file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx *.xls")])
         if not file_path:
             return
 
         try:
-            self.df = pd.read_excel(file_path)
+            self.df_raw_original = pd.read_excel(file_path, dtype=str)
             self.current_file = file_path
-            self.df = self.apply_aggregation(self.df)
-
-            self._update_table()
-            self._update_status(f"Aggregated data from: {os.path.basename(file_path)}")
-
+            self.df_raw = self.apply_initial_base_sql(self.df_raw_original)
+            self.apply_filter()
+            self._update_status(f"Loaded and filtered: {os.path.basename(file_path)}")
             self.refresh_button.config(state=tk.NORMAL)
             self.save_button.config(state=tk.NORMAL)
-
         except Exception as e:
-            logging.error(f"File loading error: {e}")
-            messagebox.showerror("Error", f"Could not load file: {e}")
-            self.df = pd.DataFrame()
+            messagebox.showerror("Load Error", str(e))
+            self.df_raw_original = pd.DataFrame()
 
     def refresh_file(self):
-        """Re-load the last loaded file and re-apply aggregation."""
         if not self.current_file:
             return
-
         try:
-            self.df = pd.read_excel(self.current_file)
-            self.df = self.apply_aggregation(self.df)
-            self._update_table()
-            self._update_status(f"Aggregated data from: {os.path.basename(self.current_file)}")
+            self.df_raw_original = pd.read_excel(self.current_file, dtype=str)
+            self.df_raw = self.apply_initial_base_sql(self.df_raw_original)
+
+            # Clear filters
+            self.selected_uboc_values = []
+            self.uboc_button_var.set("Select UBOC Code ▼")
+            self.date_from.delete(0, tk.END)
+            self.date_to.delete(0, tk.END)
+
+            # Show full aggregation
+            agg_df = self.apply_aggregation(self.df_raw)
+            self.table.model.df = agg_df
+            self.table.redraw()
+
+            self._update_status(f"Refreshed: {os.path.basename(self.current_file)}")
         except Exception as e:
-            logging.error(f"Refresh error: {e}")
-            messagebox.showerror("Error", f"Could not refresh file: {e}")
+            messagebox.showerror("Refresh Error", str(e))
 
     def save_file(self):
-        """Save the aggregated DataFrame to Excel."""
-        if self.df.empty:
+        df_to_save = self.table.model.df
+        if df_to_save.empty:
             messagebox.showerror("Error", "No data to save.")
             return
 
@@ -173,31 +236,21 @@ class ExcelTableApp:
             filetypes=[("Excel files", "*.xlsx *.xls")],
             title="Save Aggregated Data"
         )
-
         if not file_path:
             return
 
         try:
-            if file_path.endswith(".xls"):
-                self.df.to_excel(file_path, index=False, engine="xlwt")
-            else:
-                self.df.to_excel(file_path, index=False)
-
+            df_to_save.to_excel(file_path, index=False)
             self._update_status(f"Data saved to: {os.path.basename(file_path)}")
         except Exception as e:
-            logging.error(f"Save error: {e}")
-            messagebox.showerror("Error", f"Could not save file: {e}")
-
-    def _update_table(self):
-        """Update table view with new DataFrame."""
-        self.table.model.df = self.df
-        self.table.redraw()
+            messagebox.showerror("Save Error", str(e))
 
     def _update_status(self, message: str):
-        """Update file label with the given message."""
         self.file_label.config(text=message)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
     app = ExcelTableApp(root)
     root.mainloop()
+

@@ -80,13 +80,22 @@ class ExcelTableApp:
     def apply_aggregation(self, df: pd.DataFrame) -> pd.DataFrame:
         query = (
             "SELECT "
-            "*"
+            "df1.Name, df1.Title, "
+            "SUM(CASE WHEN df1.Rev LIKE 'B%' THEN 1 ELSE 0 END) AS IFR, "
+            "SUM(CASE WHEN df1.Rev LIKE 'D%' THEN 1 ELSE 0 END) AS AFD, "
+            "SUM(CASE WHEN df1.Rev LIKE 'U%' THEN 1 ELSE 0 END) AS AFU, "
+            "SUM(CASE WHEN df1.Rev LIKE 'H%' THEN 1 ELSE 0 END) AS AFH, "
+            "SUM(CASE WHEN df1.Rev LIKE 'I%' THEN 1 ELSE 0 END) AS IFI, "
+            "SUM(CASE WHEN df1.Rev LIKE 'E%' THEN 1 ELSE 0 END) AS IFE, "
+            "SUM(CASE WHEN df1.Rev LIKE 'P%' THEN 1 ELSE 0 END) AS IFP, "
+            "SUM(CASE WHEN df1.Rev LIKE 'C%' THEN 1 ELSE 0 END) AS AFC "
             "FROM df df1 "
             "WHERE NOT EXISTS ("
             "SELECT 1 FROM df df2 "
             "WHERE df1.name = df2.name AND df2.Rev IN ('V01', 'X01')) "
             "AND df1.Rev != 'A01'"
             "AND df1.Subject IN ('EXECUTE', 'DEFINE/EXECUTE')"
+            "GROUP BY df1.Name, df1.Title"
         )
         try:
             result_df = sqldf(query, {"df": df})

@@ -76,7 +76,7 @@ class ExcelTableApp:
 
         self.uboc_vars = {}
         all_values = sorted(self.df_raw["UBOC Return Code"].dropna().unique())
-        all_values = ["ALL"] + all_values + ["BLANK"]
+        all_values = all_values + ["BLANK"]
 
         for val in all_values:
             var = tk.BooleanVar(value=val in self.selected_uboc_values)
@@ -213,7 +213,18 @@ class ExcelTableApp:
         try:
             self.df_raw_original = pd.read_excel(self.current_file, dtype=str)
             self.df_raw = self.apply_initial_base_sql(self.df_raw_original)
-            self.apply_filter()
+
+            # Clear filters
+            self.selected_uboc_values = []
+            self.uboc_button_var.set("Select UBOC Code ▼")
+            self.date_from.delete(0, tk.END)
+            self.date_to.delete(0, tk.END)
+
+            # Show full aggregation
+            agg_df = self.apply_aggregation(self.df_raw)
+            self.table.model.df = agg_df
+            self.table.redraw()
+
             self._update_status(f"Refreshed: {os.path.basename(self.current_file)}")
         except Exception as e:
             messagebox.showerror("Refresh Error", str(e))
@@ -246,3 +257,4 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = ExcelTableApp(root)
     root.mainloop()
+
