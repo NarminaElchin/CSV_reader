@@ -167,8 +167,26 @@ class CSVTableApp:
             agg_df['IFE'] = (agg_df['Rev'].str.startswith('E')).fillna(False).astype(int)
             agg_df['IFP'] = (agg_df['Rev'].str.startswith('P')).fillna(False).astype(int)
             agg_df['AFC'] = (agg_df['Rev'].str.startswith('C')).fillna(False).astype(int)
-            return agg_df.groupby(['Name', 'Title'])[
-                ['IFR', 'AFD', 'AFU', 'AFH', 'IFI', 'IFE', 'IFP', 'AFC']].sum().reset_index()
+
+            # Group by Name and Title, summing the numeric columns
+            grouped = agg_df.groupby(['Name', 'Title'])[
+                ['IFR', 'AFD', 'AFU', 'AFH', 'IFI', 'IFE', 'IFP', 'AFC']
+            ].sum().reset_index()
+
+            # Compute grand totals for each numeric column
+            total_values = grouped[['IFR', 'AFD', 'AFU', 'AFH', 'IFI', 'IFE', 'IFP', 'AFC']].sum()
+            total_row = {
+                'Name': 'Grand Total',
+                'Title': ''
+            }
+            # Add each column's total to the row dictionary
+            for col in total_values.index:
+                total_row[col] = total_values[col]
+
+            # Append the totals row to the DataFrame
+            total_df = pd.DataFrame([total_row])
+            final_df = pd.concat([grouped, total_df], ignore_index=True)
+            return final_df
         except Exception as e:
             messagebox.showwarning("Aggregation Failed", f"{e}")
             return df
@@ -292,6 +310,8 @@ class CSVTableApp:
     def save_file(self):
         import pandas as pd
         import openpyxl
+        from openpyxl.styles import Alignment
+
         if self.table is None or self.table.model.df.empty:
             messagebox.showerror("Error", "No data to save.")
             return
@@ -306,6 +326,18 @@ class CSVTableApp:
 
         try:
             self.table.model.df.to_excel(file_path, index=False, engine='openpyxl')
+
+            wb = openpyxl.load_workbook(file_path)
+            sheet = wb.active
+            last_row = sheet.max_row  # Find the last row in the sheet
+
+            # Merge the first two columns in the last row
+            sheet.merge_cells(start_row=last_row, start_column=1, end_row=last_row, end_column=2)
+            cell = sheet.cell(row=last_row, column=1)
+            cell.value = "Grand Total"
+            cell.alignment = Alignment(horizontal='center')
+
+            wb.save(file_path)
             self._update_status(f"Data saved to: {os.path.basename(file_path)}")
         except Exception as e:
             messagebox.showerror("Save Error", f"Failed to save Excel file: {e}")
